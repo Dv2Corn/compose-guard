@@ -16,7 +16,8 @@ from pathlib import Path
 
 
 def docker(args, cwd=None):
-    return subprocess.run(["docker", "compose", *args], cwd=cwd, text=True,
+    """Every docker call goes through here (tests replace it). args start after `docker`."""
+    return subprocess.run(["docker", *args], cwd=cwd, text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
 
@@ -126,12 +127,17 @@ def notify(args, message):
                 raise RuntimeError("webhook notification failed")
 
 
-def run_deploy(args, compose_file, path):
+def take_lock(path):
     lock = open(str(path) + ".lock", "a+")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        raise RuntimeError("another compose-guard operation is running")
+        raise RuntimeError("another compose-guard operation is already running") from None
+    return lock  # keep the handle open: the lock lives as long as it does
+
+
+def run_deploy(args, compose_file, path):
+    lock = take_lock(path)
     override = compose_file.parent / ".compose-guard-override.yml"
     old = containers(args.service, compose_file)
     if not old:
@@ -220,8 +226,7 @@ def main(argv=None):
             if args.fails < 1 or args.interval < 1 or args.watch < 1:
                 raise RuntimeError("watch, interval, and fails must be positive")
             return run_deploy(args, compose_file, path)
-        lock = open(str(path) + ".lock", "a+")
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock = take_lock(path)
         if not path.exists():
             raise RuntimeError("no saved deployment state")
         state = json.loads(path.read_text())
