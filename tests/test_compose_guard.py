@@ -74,5 +74,22 @@ class ComposeGuardTests(unittest.TestCase):
         self.assertNotIn("secret-token", output.getvalue())
 
 
+
+class DockerCommandTests(unittest.TestCase):
+    def test_commands_reach_docker_in_the_right_shape(self):
+        calls = []
+
+        def fake(args, cwd=None):
+            calls.append(args)
+            out = '{"ID": "abc"}' if args[-1] == "web" else '[{"Name": "/web-1", "Config": {"Image": "x:1"}}]'
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cg, "docker", side_effect=fake):
+            f = Path(d) / "compose.yml"
+            cg.containers("web", f)
+        self.assertEqual(calls[0][:3], ["compose", "-f", str(f)])
+        self.assertEqual(calls[0][-4:], ["ps", "--format", "json", "web"])
+        self.assertEqual(calls[1], ["inspect", "abc"])
+
 if __name__ == "__main__":
     unittest.main()
